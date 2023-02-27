@@ -6,6 +6,7 @@ import numpy
 import torch
 from algo.state_ei.main import RZero
 from game.dmcontrol import make_dmcontrol_lowdim
+from curling_simulator.gym_env import CurlingTwoAgentGymEnv_v1
 from arg_utils import *
 import pickle_utils
 
@@ -15,28 +16,29 @@ except ModuleNotFoundError:
     raise ModuleNotFoundError('\nPlease run "pip install gym[atari]"')
 
 
-class DMControlExperientConfig:
-    def __init__(self, env_id, task_name):
+class CurlingConfig:
+    def __init__(self, env_id):
         # More information is available here: https://github.com/werner-duvaud/muzero-general/wiki/Hyperparameter-Optimization
         self.env_id = env_id
-        self.task_name = task_name
         self.exp_name = 'Experiment'
 
         self.seed = 42  # Seed for numpy, torch and the game
         self.max_num_gpus = 4  # Fix the maximum number of GPUs to use. It's usually faster to use a single GPU (set it to 1) if it has enough memory. None will use every GPUs available
-        self.total_cpus = 64
+        self.total_cpus = 128
         self.num_gpus = 4
 
         ### Expert data
-        self.expert_demo_path = './walker_walk_demo.pkl'
+        self.expert_demo_path = './data/walker_walk_demo.pkl'
+
+        self.env = CurlingTwoAgentGymEnv_v1()
 
         ### Game
         # self.dummy_game = make_dmcontrol_lowdim(env_id, task_name, 0)
-        self.observation_shape = (3, 96, 96)  # Dimensions of the game observation, must be 3D (channel, height, width). For a 1D array, please reshape it to (1, 1, length of array)
+        self.observation_shape = (1, 1, 34)  # Dimensions of the game observation, must be 3D (channel, height, width). For a 1D array, please reshape it to (1, 1, length of array)
         self.action_space_size = 1            #  Fixed list of all possible actions. You should only edit the length
-        self.players = list(range(1))  # List of players. You should only edit the length
+        self.players = list(range(2))  # List of players. You should only edit the length
         self.stacked_observations = 1  # How many observations are stacked together.
-        self.env_action_space = make_dmcontrol_lowdim(env_id, task_name, 0).action_space
+        self.env_action_space = self.env.action_space
 
         ### Self-Play
         self.epoch_repeat = 1
@@ -60,8 +62,8 @@ class DMControlExperientConfig:
         # This part can work for the walker.
         self.nd = 5
         self.init_zero = 1
-        self.mlp_obs_shape = make_dmcontrol_lowdim(self.env_id, self.task_name, 0).observation_space.shape[0]
-        self.mlp_action_shape = make_dmcontrol_lowdim(self.env_id, self.task_name, 0).action_space.shape[0]
+        self.mlp_obs_shape = self.env.observation_space.shape[0]
+        self.mlp_action_shape = self.env.action_space.shape[0]
         self.act = 'relu'
         self.rep_act = 'identity'
         self.mlp_hidden_shape = 128
@@ -87,7 +89,7 @@ class DMControlExperientConfig:
         self.save_model = True  # Save the checkpoint in results_path as model.checkpoint
         self.training_steps = int(1000e3)  # Total number of training steps (ie weights update according to a batch)
         self.batch_size = 256  # Number of parts of games to train on at each training step
-        self.checkpoint_interval = 100  # TODO(): Set back to 1e3, Number of training steps before using the model for self-playing
+        self.checkpoint_interval = 1000  # TODO(): Set back to 1e3, Number of training steps before using the model for self-playing
         # self.value_loss_weight = 0.25  # Scale the value loss to avoid overfitting of the value function, paper recommends 0.25 (See paper appendix Reanalyze)
         self.train_on_gpu = torch.cuda.is_available()  # Train on GPU if available
         self.save_interval = 10000
@@ -110,7 +112,7 @@ class DMControlExperientConfig:
         self.num_unroll_steps_reanalyze = 5  # Number of game moves to keep for every batch element
         self.num_unroll_steps = 5
 
-        self.td_steps = 5  # Number of steps in the future to take into account for calculating the target value
+        self.td_steps = 20  # Number of steps in the future to take into account for calculating the target value
         self.PER = False  # Prioritized Replay (See paper appendix Training), select in priority the elements in the replay buffer which are unexpected for the network
         self.PER_alpha = 1  # How much prioritization is used, 0 corresponding to the uniform case, paper suggests 1
 
@@ -175,7 +177,8 @@ class DMControlExperientConfig:
         return config
 
     def new_game(self, seed=0):
-        return make_dmcontrol_lowdim(self.env_id, self.task_name, seed=seed, frameskip=self.frame_skip)
+        env = CurlingTwoAgentGymEnv_v1()
+        return env
 
     def visit_softmax_temperature_fn(self, trained_steps):
         """
@@ -194,9 +197,9 @@ class DMControlExperientConfig:
             return 0.25
 
     def initialize(self):
-        self.mlp_obs_shape = make_dmcontrol_lowdim(self.env_id, self.task_name, 0).observation_space.shape[0]
-        self.mlp_action_shape = make_dmcontrol_lowdim(self.env_id, self.task_name, 0).action_space.shape[0]
-        self.env_action_space = make_dmcontrol_lowdim(self.env_id, self.task_name, 0).action_space
+        self.mlp_obs_shape = self.env.observation_space.shape[0]
+        self.mlp_action_shape = self.env.action_space.shape[0]
+        self.env_action_space = self.env.action_space
         self.action_space_size = self.mlp_action_shape
 
     def sample_random_actions(self, n):
@@ -211,7 +214,7 @@ class DMControlExperientConfig:
 
 
 if __name__ == '__main__':
-    config = DMControlExperientConfig(env_id='cartpole', task_name='swingup')
+    config = CurlingConfig(env_id='curling')
     parser = create_parser_from_config(config)
     parser.add_argument('--test', type=int, default=0)
     parser.add_argument('--checkpoint', type=str, default='')
